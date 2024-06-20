@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Salon - Pierre-Feuille-Ciseaux</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+      .modal {
+        display: none;
+        position: fixed;
+        z-index: 1;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        background-color: rgb(0,0,0);
+        background-color: rgba(0, 0, 0, 0.4);
+        padding-top: 60px;
+      }
+
+      .modal-content {
+        background-color: #fefefe;
+        margin: 5% auto;
+        padding: 20px;
+        border: 1px solid #888;
+        width: 80%;
+      }
+
+      .close {
+        color: #aaa;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+      }
+
+      .close:hover,
+      .close:focus {
+        color: black;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+
+    </style>
+</head>
+    <body>
+        <div id="pseudoModal" class="modal">
+            <div class="modal-content">
+                <span class="close"></span>
+                <h2>Entrez votre pseudo</h2>
+                <input type="text" id="pseudoInput" placeholder="Pseudo">
+                <button id="submitPseudo">Soumettre</button>
+                <p id="error" style="color: red;"></p>
+            </div>
+        </div>
+        <div class="container mt-5">
+            <h1 class="text-center mb-4">Salon - Pierre-Feuille-Ciseaux</h1>
+            <div id="players" class="mb-4"></div>
+            <button id="readyBtn" class="btn btn-primary">Prêt</button>
+            <div id="choices" class="mt-4" style="display: none;">
+                <button class="btn btn-secondary" onclick="makeChoice('pierre')">Pierre</button>
+                <button class="btn btn-secondary" onclick="makeChoice('feuille')">Feuille</button>
+                <button class="btn btn-secondary" onclick="makeChoice('ciseaux')">Ciseaux</button>
+                <button class="btn btn-secondary" onclick="makeChoice('puit')">Puit</button>
+            </div>
+            <div id="result" class="mt-4"></div>
+            <div id="scores" class="mt-4"></div>
+            <div id="roundsCounter" class="mt-4"></div>
+        </div>
+    </body>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io()
+        const pseudoModal = document.getElementById("pseudoModal")
+        const pseudoInput = document.getElementById("pseudoInput")
+        const closeModal = document.getElementsByClassName("close")[0]
+        const submitPseudoButton = document.getElementById("submitPseudo")
+        const errorElement = document.getElementById("error")
+        const readyBtn = document.getElementById('readyBtn')
+
+        let pseudo = ""
+        
+        submitPseudoButton.onclick = function() {
+            const inputPseudo = pseudoInput.value.trim()
+
+            if (inputPseudo === "") {
+                errorElement.textContent = "Le pseudo ne peut être vide !"
+            } else {
+                // Vérifier la dispo du pseudo coté serveur
+                socket.emit("checkPseudo", inputPseudo, (pseudoValide) => {
+                    if (pseudoValide) {
+                        pseudo = inputPseudo
+                        pseudoModal.style.display = "none"
+                        socket.emit("setPseudo", pseudo)
+                    } else {
+                        errorElement.textContent = "Ce pseudo est déjà utilisé"
+                    }
+                });
+            }
+            // Rejoindre le canal correspondant au chargement
+            const salon = window.location.pathname.split("/").pop()
+            console.log(salon, inputPseudo);
+            socket.emit("joinSalon", { salonId: salon, pseudo: inputPseudo })
+        }
+
+        
+
+        readyBtn.addEventListener('click', () => {
+            socket.emit('ready');
+            document.getElementById('readyBtn').style.display = 'none';
+            document.getElementById('choices').style.display = 'block';
+        });
+
+        // Ouvrir le modal au chargement de la page
+        pseudoModal.style.display = "block"
+
+        socket.on('joinedSalon', (salonId) => {
+            console.log(`Rejoint le salon ${salonId}`);
+        });
+
+        socket.on('salonFull', () => {
+            errorElement.innerHTML = "Le salon est plein. <button><a href='/'>Veuillez rejoindre un autre salon.</a></button>";
+            pseudoModal.style.display = "block";
+        });
+
+        socket.on('updatePlayers', (players) => {
+            document.getElementById('players').innerHTML = `Joueurs dans le salon : ${players.length}`;
+        });
+
+        socket.on('playerReady', (playerId) => {
+            console.log(`Joueur ${playerId} est prêt`);
+        });
+
+        socket.on('playerChoice', (data) => {
+            console.log(`Joueur ${data.playerId} a fait un choix : ${data.choice}`);
+        });
+
+        socket.on('result', (result) => {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '<h3>Résultats</h3>';
+            if (result.tie) {
+                resultDiv.innerHTML += `<p>Égalité entre tous les joueurs !</p>`;
+            } else {
+                result.winners.forEach(winner => {
+                    resultDiv.innerHTML += `<p id="gagnant">Gagnant : ${winner.playerPseudo} (${winner.choice})</p>`;
+                });
+                result.losers.forEach(loser => {
+                    resultDiv.innerHTML += `<p id="perdant">Perdant : ${loser.playerPseudo} (${loser.choice})</p>`;
+                });
+            }
+            const pGagnant = document.getElementById('gagnant');
+            const pPerdant = document.getElementById('perdant');
+            pGagnant.style.color = "green"
+            pPerdant.style.color = "red"
+        });
+
+        socket.on('scoreUpdate', (scores) => {
+            console.log("scoreUpdates", scores);
+            const scoreDiv = document.getElementById('scores');
+            scoreDiv.innerHTML = '<h3>Scores</h3>';
+            for (const player in scores) {
+                scoreDiv.innerHTML += `<p>${player} : ${scores[player]}</p>`;
+            }
+            document.getElementById('choices').style.display = 'block';
+        });
+
+        socket.on('updateRounds', (rounds) => {
+            roundsCounter.textContent = `Tour: ${rounds} / 10`;
+        });
+
+        socket.on('finalResult', (finalScores) => {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML += '<h3>Résultat final</h3>';
+            finalScores.forEach(([player, score]) => {
+                resultDiv.innerHTML += `<p>${player} : ${score}</p>`;
+            });
+        });
+
+        function makeChoice(choice) {
+            socket.emit('choice', choice);
+            document.getElementById('choices').style.display = 'none';
+        }
+    </script>
+</html>
